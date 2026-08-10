@@ -14,13 +14,41 @@ const app = express();
 const server = http.createServer(app);
 
 const PORT = process.env.PORT || 5000;
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+// Parse FRONTEND_URL or default to localhost, and add common local environments
+const configuredOrigins = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(',').map((url) => url.trim().replace(/\/$/, ''))
+  : [];
+
+const allowedOrigins = Array.from(
+  new Set([
+    ...configuredOrigins,
+    'https://virtualhealthconsultancy.netlify.app',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+  ])
+).filter(Boolean);
+
+// Dynamic origin validation function for Express CORS
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (e.g. mobile apps, Postman, server-to-server)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS policy error: Origin ${origin} is not allowed`));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
 
 // Connect Database
 dbConnect();
 
 // Middlewares
-app.use(cors({ origin: FRONTEND_URL, credentials: true }));
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser());
 
@@ -32,25 +60,30 @@ app.get('/api/health', (req, res) => {
 // Auth & REST Routes
 app.use('/api', authRoutes);
 
+// Shared Socket.io CORS Configuration
+const socketCorsOptions = {
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`Socket CORS policy error: Origin ${origin} is not allowed`));
+    }
+  },
+  methods: ['GET', 'POST'],
+  credentials: true,
+};
+
 // Socket.io Instance 1: Chat Signaling (/api/socket)
 const chatIo = new Server(server, {
   path: '/api/socket',
-  cors: {
-    origin: FRONTEND_URL,
-    methods: ['GET', 'POST'],
-    credentials: true,
-  },
+  cors: socketCorsOptions,
 });
 initChatSocket(chatIo);
 
 // Socket.io Instance 2: Video WebRTC Signaling (/api/video/socket)
 const videoIo = new Server(server, {
   path: '/api/video/socket',
-  cors: {
-    origin: FRONTEND_URL,
-    methods: ['GET', 'POST'],
-    credentials: true,
-  },
+  cors: socketCorsOptions,
 });
 initVideoSocket(videoIo);
 
